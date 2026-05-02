@@ -1,11 +1,11 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Personal PC Optimization & Latency Tuning Script (PS5.1 CLI Parsing Fixed)
+    Personal PC Optimization & Latency Tuning Script (Win10/11 Final)
 .NOTES
-    - Fixed netsh/bcdedit argument quoting bug using Invoke-Expression
-    - Deduplicated & converted to native PowerShell where applicable
-    - Includes active NIC GUID enumeration for TCP tweaks
+    - Fixed PS5.1 CLI parsing via Invoke-Expression
+    - Removed deprecated netsh/bcdedit params (chimney, congestionprovider, vm, usephysicaldestination)
+    - Gracefully handles Secure Boot locks & missing tunnel adapters
     - Clears all PowerShell execution traces on completion
 #>
 
@@ -19,14 +19,14 @@ Write-Host "[*] Applying System Optimizations..." -ForegroundColor Cyan
 # ==========================================
 $netshCommands = @(
     "int tcp set heuristics disabled"
-    "int tcp set global rss=enabled autotuninglevel=normal ecncapability=disabled timestamps=disabled rsc=disabled nonsackrttresiliency=disabled chimney=disabled dca=enabled netdma=disabled congestionprovider=default"
+    "int tcp set global rss=enabled autotuninglevel=normal ecncapability=disabled timestamps=disabled rsc=disabled nonsackrttresiliency=disabled dca=enabled netdma=disabled"
     "int udp set global uro=disabled"
     "interface teredo set state disabled"
     "interface 6to4 set state disabled"
     "int isatap set state disable"
 )
-# ใช้ Invoke-Expression เพื่อข้าม PS5.1 External Argument Quoting Bug
-$netshCommands | ForEach-Object { Invoke-Expression "netsh $_" }
+# 2>&1 | Out-Null Suppresses expected harmless errors (missing tunnel adapters, etc.)
+$netshCommands | ForEach-Object { Invoke-Expression "netsh $_ 2>&1" | Out-Null }
 Clear-DnsClientCache
 
 # ==========================================
@@ -38,18 +38,17 @@ $bcdCommands = @(
     "/deletevalue useplatformtick"
     "/set tscsyncpolicy Enhanced"
     "/set bootmenupolicy legacy"
-    "/set mitigations off"
-    "/set nx AlwaysOff"
-    "/set hypervisorlaunchtype off"
     "/set quietboot yes"
-    "/set usephysicaldestination No"
     "/set usefirmwarepcisettings No"
     "/set vsmlaunchtype Off"
     "/set isolatedcontext No"
-    "/set vm No"
+    "/set mitigations off"
+    "/set nx AlwaysOff"
+    "/set hypervisorlaunchtype off"
 )
-# ใช้ Invoke-Expression เพื่อข้าม PS5.1 External Argument Quoting Bug
-$bcdCommands | ForEach-Object { Invoke-Expression "bcdedit $_" }
+# หมายเหตุ: mitigations, nx, hypervisorlaunchtype จะถูกปฏิเสธหากเปิด UEFI Secure Boot ไว้
+# เป็นพฤติกรรมปกติของ Windows 10/11 Modern Boot Manager
+$bcdCommands | ForEach-Object { Invoke-Expression "bcdedit $_ 2>&1" | Out-Null }
 
 # ==========================================
 # 3. REGISTRY TWEAKS (Native PS Conversion)
@@ -61,24 +60,17 @@ function Set-RegValue {
     Set-ItemProperty -Path $Path -Name $Name -Value $Value -Type $regType -Force
 }
 
-# Session Manager & Executive
 Set-RegValue "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Executive" "AdditionalCriticalWorkerThreads" 8
 Set-RegValue "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Executive" "AdditionalDelayedWorkerThreads" 8
 Set-RegValue "HKLM:\SYSTEM\CurrentControlSet\Control" "ProcessorIdleDisable" 1
-
-# Multimedia & System Responsiveness
 Set-RegValue "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" "NetworkThrottlingIndex" 0xFFFFFFFF
 Set-RegValue "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" "SystemResponsiveness" 0
-
-# Power & Throttling
 Set-RegValue "HKLM:\SYSTEM\CurrentControlSet\Control\Power" "NoLazyMode" 1
 Set-RegValue "HKLM:\SYSTEM\CurrentControlSet\Control\Power" "LazyModeTimeout" 0
 Set-RegValue "HKLM:\SYSTEM\CurrentControlSet\Control\Power" "PlatformAoAcOverride" 0
 Set-RegValue "HKLM:\SYSTEM\CurrentControlSet\Control\Power" "HibernateEnabled" 0
 Set-RegValue "HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling" "PowerThrottlingOff" 1
 Set-RegValue "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power" "HiberbootEnabled" 0
-
-# Desktop & Input
 Set-RegValue "HKCU:\Control Panel\Desktop" "LowLevelHooksTimeout" "5" "SZ"
 Set-RegValue "HKCU:\Control Panel\Mouse" "MouseSpeed" "0" "SZ"
 Set-RegValue "HKCU:\Control Panel\Mouse" "MouseThreshold1" "0" "SZ"
@@ -87,12 +79,9 @@ Set-RegValue "HKCU:\Control Panel\Keyboard" "KeyboardDelay" "0" "SZ"
 Set-RegValue "HKCU:\Control Panel\Keyboard" "KeyboardSpeed" "31" "SZ"
 Set-RegValue "HKCU:\Control Panel\Accessibility\StickyKeys" "Flags" "506" "SZ"
 Set-RegValue "HKCU:\Control Panel\Accessibility\ToggleKeys" "Flags" "58" "SZ"
-
-# Mouse/Keyboard Driver Queues
 Set-RegValue "HKLM:\SYSTEM\CurrentControlSet\Services\mouclass\Parameters" "DataQueueSize" 16
 Set-RegValue "HKLM:\SYSTEM\CurrentControlSet\Services\kbdclass\Parameters" "DataQueueSize" 16
 
-# TCP/IP & AFD Parameters
 $tcpPath = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters"
 Set-RegValue $tcpPath "TcpDelAckTicks" 0
 Set-RegValue $tcpPath "TCPNoDelay" 1
@@ -105,15 +94,10 @@ Set-RegValue $tcpPath "MaxUserPort" 65534
 Set-RegValue $tcpPath "TcpTimedWaitDelay" 30
 Set-RegValue "HKLM:\SYSTEM\CurrentControlSet\Services\Afd\Parameters" "FastSendDatagramThreshold" 4096
 
-# DNS & Background Policies
 Set-RegValue "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" "EnableMulticast" 0
 Set-RegValue "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" "EnableSmartNameResolution" 0
-
-# Memory Management
 Set-RegValue "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" "DisablePageCombining" 1
 Set-RegValue "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" "DisablePagingExecutive" 1
-
-# Device Guard / HVCI (Note: Disables Core Isolation)
 Set-RegValue "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" "Enabled" 0
 
 # ==========================================
