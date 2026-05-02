@@ -1,10 +1,10 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Personal PC Optimization & Latency Tuning Script
+    Personal PC Optimization & Latency Tuning Script (CLI Parsing Fixed)
 .NOTES
+    - Fixed netsh/bcdedit argument parsing by routing through cmd.exe /c
     - Deduplicated & converted to native PowerShell where applicable
-    - Legacy CLI tools (netsh, bcdedit) wrapped safely for PS execution
     - Includes active NIC GUID enumeration for TCP tweaks
     - Clears all PowerShell execution traces on completion
 #>
@@ -15,7 +15,7 @@ $ProgressPreference = 'SilentlyContinue'
 Write-Host "[*] Applying System Optimizations..." -ForegroundColor Cyan
 
 # ==========================================
-# 1. NETWORK ADVANCED TUNING (netsh wrapper)
+# 1. NETWORK ADVANCED TUNING (netsh via cmd)
 # ==========================================
 $netshCommands = @(
     "int tcp set heuristics disabled"
@@ -25,11 +25,12 @@ $netshCommands = @(
     "interface 6to4 set state disabled"
     "int isatap set state disable"
 )
-$netshCommands | ForEach-Object { netsh $_ }
+# Route through cmd.exe to prevent PS5.1 from quoting the entire argument string
+$netshCommands | ForEach-Object { cmd.exe /c "netsh $_" }
 Clear-DnsClientCache
 
 # ==========================================
-# 2. BOOT CONFIGURATION (bcdedit wrapper)
+# 2. BOOT CONFIGURATION (bcdedit via cmd)
 # ==========================================
 $bcdCommands = @(
     "/set disabledynamictick yes"
@@ -47,7 +48,8 @@ $bcdCommands = @(
     "/set isolatedcontext No"
     "/set vm No"
 )
-$bcdCommands | ForEach-Object { bcdedit $_ }
+# Route through cmd.exe to prevent PS5.1 from quoting the entire argument string
+$bcdCommands | ForEach-Object { cmd.exe /c "bcdedit $_" }
 
 # ==========================================
 # 3. REGISTRY TWEAKS (Native PS Conversion)
