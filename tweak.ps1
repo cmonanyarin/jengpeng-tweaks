@@ -1,9 +1,9 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Personal PC Optimization & Latency Tuning Script (CLI Parsing Fixed)
+    Personal PC Optimization & Latency Tuning Script (PS5.1 CLI Parsing Fixed)
 .NOTES
-    - Fixed netsh/bcdedit argument parsing by routing through cmd.exe /c
+    - Fixed netsh/bcdedit argument quoting bug using Invoke-Expression
     - Deduplicated & converted to native PowerShell where applicable
     - Includes active NIC GUID enumeration for TCP tweaks
     - Clears all PowerShell execution traces on completion
@@ -15,7 +15,7 @@ $ProgressPreference = 'SilentlyContinue'
 Write-Host "[*] Applying System Optimizations..." -ForegroundColor Cyan
 
 # ==========================================
-# 1. NETWORK ADVANCED TUNING (netsh via cmd)
+# 1. NETWORK ADVANCED TUNING
 # ==========================================
 $netshCommands = @(
     "int tcp set heuristics disabled"
@@ -25,12 +25,12 @@ $netshCommands = @(
     "interface 6to4 set state disabled"
     "int isatap set state disable"
 )
-# Route through cmd.exe to prevent PS5.1 from quoting the entire argument string
-$netshCommands | ForEach-Object { cmd.exe /c "netsh $_" }
+# ใช้ Invoke-Expression เพื่อข้าม PS5.1 External Argument Quoting Bug
+$netshCommands | ForEach-Object { Invoke-Expression "netsh $_" }
 Clear-DnsClientCache
 
 # ==========================================
-# 2. BOOT CONFIGURATION (bcdedit via cmd)
+# 2. BOOT CONFIGURATION
 # ==========================================
 $bcdCommands = @(
     "/set disabledynamictick yes"
@@ -48,8 +48,8 @@ $bcdCommands = @(
     "/set isolatedcontext No"
     "/set vm No"
 )
-# Route through cmd.exe to prevent PS5.1 from quoting the entire argument string
-$bcdCommands | ForEach-Object { cmd.exe /c "bcdedit $_" }
+# ใช้ Invoke-Expression เพื่อข้าม PS5.1 External Argument Quoting Bug
+$bcdCommands | ForEach-Object { Invoke-Expression "bcdedit $_" }
 
 # ==========================================
 # 3. REGISTRY TWEAKS (Native PS Conversion)
@@ -124,7 +124,6 @@ $interfacesPath = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Inte
 Get-ChildItem -Path $interfacesPath -ErrorAction SilentlyContinue | ForEach-Object {
     $key = $_.PSPath
     $props = Get-ItemProperty -Path $key -Name "DhcpIPAddress","IPAddress" -ErrorAction SilentlyContinue
-    # Only apply to adapters with a valid assigned IP
     if ($props.DhcpIPAddress -notmatch "^(0\.0\.0\.0)?$" -or $props.IPAddress -notmatch "^(0\.0\.0\.0)?$") {
         Set-RegValue $key "TcpAckFrequency" 1
         Set-RegValue $key "TCPNoDelay" 1
@@ -181,7 +180,6 @@ $psReadLinePath = (Get-PSReadLineOption).HistorySavePath
 if ($psReadLinePath -and (Test-Path $psReadLinePath)) {
     Remove-Item $psReadLinePath -Force
 }
-# Clear console host buffer
 [Microsoft.PowerShell.PSConsoleReadLine]::ClearHistory() 2>$null
 
 Write-Host "[+] Optimization Payload Complete." -ForegroundColor Green
